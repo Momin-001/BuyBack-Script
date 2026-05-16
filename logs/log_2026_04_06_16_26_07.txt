@@ -1,0 +1,2 @@
+[26-04-06 16:26:07] {scrapy.utils.log} INFO:  Scrapy 2.11.1 started (bot: hilton)
+[26-04-06 16:26:07] {scrapy.utils.log} INFO:  Versions: lxml 4.9.3.0, libxml2 2.10.3, cssselect 1.2.0, parsel 1.8.1, w3lib 2.1.2, Twisted 22.10.0, Python 3.11.1 (tags/v3.11.1:a7a450f, Dec  6 2022, 19:58:39) [MSC v.1934 64 bit (AMD64)], pyOpenSSL 23.3.0 (OpenSSL 3.1.4 24 Oct 2023), cryptography 41.0.5, Platform Windows-10-10.0.19045-SP0
