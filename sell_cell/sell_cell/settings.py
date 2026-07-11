@@ -7,6 +7,14 @@
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# .env lives next to scrapy.cfg (the directory you run the spider from)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 BOT_NAME = "sell_cell"
 
 SPIDER_MODULES = ["sell_cell.spiders"]
@@ -98,4 +106,6 @@ DOWNLOADER_MIDDLEWARES = {
 }
 REQUEST_FINGERPRINTER_CLASS = "scrapy_zyte_api.ScrapyZyteAPIRequestFingerprinter"
 ZYTE_API_TRANSPARENT_MODE = True
-ZYTE_API_KEY = "4b92ed22cf4343109de0290756ec98ee"
+ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
+if not ZYTE_API_KEY:
+    raise ValueError("ZYTE_API_KEY is not set — create a .env file next to scrapy.cfg (see .env.example)")

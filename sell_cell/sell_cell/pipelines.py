@@ -1,3 +1,4 @@
+import os
 import re
 import uuid
 import psycopg2
@@ -13,10 +14,10 @@ class SellCellPipeline:
 
         # 1️⃣ Connect to default postgres database
         temp_conn = psycopg2.connect(
-            host="localhost",
+            host=os.getenv("PG_HOST", "localhost"),
             database="postgres",  # connect to existing DB first
-            user="postgres",#your user name
-            password="your password"
+            user=os.getenv("PG_USER", "postgres"),
+            password=os.getenv("PG_PASSWORD"),
         )
         temp_conn.autocommit = True
         temp_cursor = temp_conn.cursor()
@@ -38,10 +39,10 @@ class SellCellPipeline:
 
         # 4️⃣ Now connect to buyback
         self.conn = psycopg2.connect(
-            host="localhost",
+            host=os.getenv("PG_HOST", "localhost"),
             database=db_name,
-            user="postgres",
-            password="amnaali123"
+            user=os.getenv("PG_USER", "postgres"),
+            password=os.getenv("PG_PASSWORD"),
         )
 
         self.cursor = self.conn.cursor()

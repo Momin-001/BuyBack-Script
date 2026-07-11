@@ -1,12 +1,13 @@
 import scrapy
 import json
 import csv
+from pathlib import Path
 
 class CellScraperSpider(scrapy.Spider):
     name = "cell_scraper"
     custom_settings = {
         'FEED_FORMAT': 'csv',
-        'FEED_URI': 'output/sell_cell_tab_glax.csv'
+        'FEED_URI': 'Outputs/sell_cell.csv'
     }
     urls = []
     search_urls = {"Smartphones":["https://www.sellcell.com/sell-iphone/","https://www.sellcell.com/sell/samsung-phone/"],
@@ -29,11 +30,38 @@ class CellScraperSpider(scrapy.Spider):
         'sec-ch-ua-platform': '"Windows"',
         'Cookie': '_gcl_au=1.1.1233498191.1775472965; _gid=GA1.2.1480207559.1775472965; _fbp=fb.1.1775472967941.310482786587868967; _gat_gtag_UA_19979388_1=1; _uetsid=3706e83031a711f1b1914521f97c6ba4; _uetvid=3707d01031a711f1b0031d4aa86d4528; _ga_LQT1T7TBSN=GS2.1.s1775474987$o2$g1$t1775474989$j58$l0$h0; _ga=GA1.1.575438080.1775472965'
     }
+    model_file = Path(__file__).resolve().parents[1] / 'model_numbers.json'
 
-    def start_requests(self):
-        for key,urls in self.search_urls.items():
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        with open(self.model_file, encoding='utf-8') as f:
+            categories = json.load(f)
+        self.model_map = {}
+        for devices in categories.values():
+            for device_name, model_number in devices.items():
+                self.model_map[self.normalize_name(device_name)] = model_number
+
+    @staticmethod
+    def normalize_name(name):
+        return ' '.join(name.split()).casefold()
+
+    def get_model_number(self, name):
+        key = self.normalize_name(name)
+        if key not in self.model_map:
+            if name:
+                self.logger.warning('No model number mapping for device: %s', name)
+            return ''
+        return self.model_map[key]
+
+    async def start(self):
+        for key, urls in self.search_urls.items():
             for url in urls:
-                yield scrapy.Request(url=url, headers=self.headers, callback=self.parse,meta={'cat':key})
+                yield scrapy.Request(
+                url=url,
+                headers=self.headers,
+                callback=self.parse,
+                meta={"cat": key},
+            )
 
 
     def parse(self, response, **kwargs):
@@ -124,17 +152,18 @@ class CellScraperSpider(scrapy.Spider):
             data = {}
 
         item = dict()
-        # item['Category'] = response.meta['cat']
-        item['Type'] = data.get('type', '')
+        buyback_price = self.get_buyback(data.get('prices', []))
+        item['Category'] = response.meta['cat']
         item['Brand'] = data.get('brand', '')
         item['Name'] = data.get('name', '')
+        item['Model_Number'] = self.get_model_number(item['Name'])
         item['Image'] = response.meta['image']
-        item['Maximum_Price'] = self.get_max(data.get('prices', []))
-        item['Buybackworld_Price'] = self.get_buyback(data.get('prices', []))
-        item['Status']='Active'
         item['Network'] = response.meta['network']
         item['Capacity'] = response.meta['capacity']
         item['Condition'] = response.meta['condition']
+        item['Price'] = self.calculate_price(buyback_price)
+        item['Buybackworld_Price'] = buyback_price if buyback_price is not None else 0
+        item['Maximum_Price'] = self.get_max(data.get('prices', []))
         yield item
 
     def get_buyback(self, prices):
@@ -143,9 +172,26 @@ class CellScraperSpider(scrapy.Spider):
             if name == 'BuyBackWorld':
                 return float(price.get('price', ''))
 
+    def calculate_price(self, buyback_price):
+        if buyback_price is None:
+            return 0
+        if buyback_price < 25:
+            return buyback_price + 1
+        if buyback_price < 50:
+            return buyback_price + 2
+        if buyback_price < 100:
+            return buyback_price + 3
+        if buyback_price <= 200:
+            return buyback_price + 5
+        if buyback_price <= 300:
+            return buyback_price + 7
+        if buyback_price <= 500:
+            return buyback_price + 10
+        return buyback_price + 15
+
     def get_max(self, items):
         prices = [float(item.get('price', '')) for item in items]
-        return max(prices) if prices else ''
+        return max(prices) if prices else 0
 
     def get_collapse(self, data):
         urls =[]
