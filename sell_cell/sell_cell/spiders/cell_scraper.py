@@ -6,19 +6,22 @@ from pathlib import Path
 
 class CellScraperSpider(scrapy.Spider):
     name = "cell_scraper"
-    custom_settings = {
-        'FEED_FORMAT': 'csv',
-        'FEED_URI': 'Outputs/sell_cell.csv',
-        # Macs add Processor/Memory, which phones and tablets do not have. Without a
-        # fixed field list the CSV header is locked in from whichever item is scraped
-        # first and the extra columns would be silently dropped.
-        'FEED_EXPORT_FIELDS': ['Category', 'Brand', 'Name', 'Model_Number', 'Image', 'Network',
-                               'Capacity', 'Memory', 'Processor', 'Condition', 'Price',
-                               'Buybackworld_Price', 'Maximum_Price'],
-    }
+    # The POOR/FAULTY price rule compares two rows that arrive on separate async
+    # requests, so we can't stream to Scrapy's FEED exporter row-by-row. Instead we
+    # buffer every row and write the CSV ourselves in closed(), once all requests are
+    # done and the cross-condition comparison can be made.
+    output_file = Path('Outputs/sell_cell.csv')
+    # Macs add Processor/Memory, which phones and tablets do not have. A fixed field
+    # list keeps the header stable no matter which device type is scraped first.
+    fieldnames = ['Category', 'Brand', 'Name', 'Model_Number', 'Image', 'Network',
+                  'Capacity', 'Memory', 'Processor', 'Condition', 'Price',
+                  'Buybackworld_Price', 'Maximum_Price']
+    # SellCell's condition labels, renamed for our output only (the site's payload
+    # still uses the raw new/working/poor/broken values).
+    condition_labels = {'MINT': 'EXCELLENT', 'FAULTY': 'BROKEN'}
     urls = []
     search_urls = {
-                   "Smartphones":["https://www.sellcell.com/sell-iphone/","https://www.sellcell.com/sell/samsung-phone/"],
+                   "Phones":["https://www.sellcell.com/sell-iphone/","https://www.sellcell.com/sell/samsung-phone/"],
                    "Tablets":["https://www.sellcell.com/sell/ipad/","https://www.sellcell.com/sell/samsung-tablet/"],
                    "Laptops":["https://www.sellcell.com/sell/apple-macbook/"]
                    }
@@ -48,6 +51,7 @@ class CellScraperSpider(scrapy.Spider):
             categories = json.load(f)
         self.model_map = {}
         self.unmapped_names = set()
+        self.items = []
         for devices in categories.values():
             for device_name, model_number in devices.items():
                 self.model_map[self.normalize_name(device_name)] = model_number
@@ -196,11 +200,55 @@ class CellScraperSpider(scrapy.Spider):
         item['Capacity'] = response.meta['capacity']
         item['Memory'] = response.meta['memory']
         item['Processor'] = response.meta['processor']
-        item['Condition'] = response.meta['condition']
-        item['Price'] = self.calculate_price(buyback_price)
+        condition = response.meta['condition']
+        item['Condition'] = self.condition_labels.get(condition, condition)
         item['Buybackworld_Price'] = buyback_price if buyback_price is not None else 0
         item['Maximum_Price'] = self.get_max(data.get('prices', []))
-        yield item
+        # Raw BuyBackWorld price (None when missing) kept for the POOR/FAULTY rule and
+        # the final Price calculation, both applied in closed(); not a CSV column.
+        item['_buyback'] = buyback_price
+        self.items.append(item)
+
+    def closed(self, reason):
+        # All requests are done; now the buffered rows can be cross-compared and priced.
+        self.apply_condition_pricing()
+        self.write_csv()
+
+    def apply_condition_pricing(self):
+        # Requirement 2: within a variant (same product and every attribute except
+        # condition), if the BuyBackWorld POOR and FAULTY/BROKEN prices are equal, drop
+        # the BROKEN price to 0.6x the POOR price. Runs before Price is calculated so
+        # the adjusted value feeds the formula.
+        groups = {}
+        for item in self.items:
+            key = (item['Name'], item['Network'], item['Capacity'],
+                   item['Memory'], item['Processor'])
+            groups.setdefault(key, {})[item['Condition']] = item
+        for variant in groups.values():
+            poor = variant.get('POOR')
+            broken = variant.get('BROKEN')
+            if poor and broken and poor['_buyback'] is not None \
+                    and poor['_buyback'] == broken['_buyback']:
+                adjusted = round(0.6 * poor['_buyback'], 2)
+                broken['_buyback'] = adjusted
+                broken['Buybackworld_Price'] = adjusted
+
+        # Requirement 3: SellCell has no BuyBackWorld price for MacBooks, so their Price
+        # is 1.02x the maximum price. Every other device keeps the BuyBackWorld tier
+        # formula, now applied to the possibly-adjusted BROKEN price.
+        for item in self.items:
+            if item['Category'] == 'Laptops' and item['Brand'] == 'Apple':
+                item['Price'] = round(1.02 * item['Maximum_Price'], 2)
+            else:
+                item['Price'] = self.calculate_price(item['_buyback'])
+
+    def write_csv(self):
+        self.output_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.output_file, 'w', encoding='utf-8', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction='ignore')
+            writer.writeheader()
+            writer.writerows(self.items)
+        self.logger.info('Wrote %d rows to %s', len(self.items), self.output_file)
 
     def get_buyback(self, prices):
         for price in prices:
