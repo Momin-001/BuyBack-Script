@@ -23,7 +23,8 @@ class CellScraperSpider(scrapy.Spider):
     search_urls = {
                    "Phones":["https://www.sellcell.com/sell-iphone/","https://www.sellcell.com/sell/samsung-phone/"],
                    "Tablets":["https://www.sellcell.com/sell/ipad/","https://www.sellcell.com/sell/samsung-tablet/"],
-                   "Laptops":["https://www.sellcell.com/sell/apple-macbook/"]
+                   "Laptops":["https://www.sellcell.com/sell/apple-macbook/"], 
+                   "Smartwatches":["https://www.sellcell.com/sell/apple-watch/"]
                    }
     headers = {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
